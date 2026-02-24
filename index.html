@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>訪客預約與車牌登記系統</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        body { font-family: "Microsoft JhengHei", sans-serif; background-color: #f4f7f6; margin: 0; padding: 20px; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h2 { text-align: center; color: #2c3e50; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; font-weight: bold; margin-bottom: 5px; }
+        input[type="text"], input[type="date"], select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        .captcha-box { display: flex; align-items: center; gap: 10px; }
+        .captcha-code { background: #eee; padding: 10px 15px; font-weight: bold; letter-spacing: 3px; font-family: monospace; font-size: 18px; border-radius: 4px; user-select: none; }
+        button { background-color: #3498db; color: white; border: none; padding: 10px 20px; font-size: 16px; border-radius: 4px; cursor: pointer; width: 100%; transition: background 0.3s; }
+        button:hover { background-color: #2980b9; }
+        button:disabled { background-color: #95a5a6; cursor: not-allowed; }
+        .success-panel { display: none; text-align: center; border: 2px dashed #2ecc71; padding: 20px; border-radius: 8px; margin-top: 20px; }
+        .success-panel h3 { color: #2ecc71; }
+        .list-panel { margin-top: 40px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: center; }
+        th { background-color: #f8f9fa; }
+        .loading-text { text-align: center; color: #7f8c8d; padding: 20px; font-style: italic; }
+    </style>
+</head>
+<body>
+
+<div class="container" id="appContainer">
+    <h2>訪客預約登記</h2>
+    
+    <form id="bookingForm" onsubmit="submitForm(event)">
+        <div class="form-group">
+            <label>訪客姓名</label>
+            <input type="text" id="visitorName" required placeholder="請輸入訪客姓名">
+        </div>
+        <div class="form-group">
+            <label>被訪人姓名</label>
+            <input type="text" id="hostName" required placeholder="請輸入被訪人姓名">
+        </div>
+        <div class="form-group">
+            <label>來訪日期 (限今起三日內)</label>
+            <input type="date" id="visitDate" required>
+        </div>
+        <div class="form-group">
+            <label>來訪時段</label>
+            <select id="visitTime">
+                <option value="上午">上午</option>
+                <option value="下午">下午</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>車牌號碼 (一台車一次申請)</label>
+            <input type="text" id="licensePlate" required placeholder="例如: ABC-1234">
+        </div>
+        <div class="form-group">
+            <label>驗證碼</label>
+            <div class="captcha-box">
+                <span class="captcha-code" id="captchaDisplay"></span>
+                <input type="text" id="captchaInput" required placeholder="請輸入左側驗證碼">
+            </div>
+        </div>
+        <button type="submit" id="submitBtn">確認送出申請</button>
+    </form>
+
+    <div id="successPanel" class="success-panel">
+        <h3>✅ 預約申請成功</h3>
+        <p>請截圖或下載此畫面，以利進出場查驗</p>
+        <hr>
+        <p><strong>訪客車牌：</strong> <span id="resPlate"></span></p>
+        <p><strong>來訪日期：</strong> <span id="resDate"></span> <span id="resTime"></span></p>
+        <p><strong>核發時間：</strong> <span id="resTimestamp"></span></p>
+        <button type="button" onclick="downloadScreenshot()" style="margin-top: 15px; background-color: #2ecc71;">📥 下載電子憑證</button>
+        <button type="button" onclick="resetForm()" style="margin-top: 10px; background-color: #95a5a6;">返回新增預約</button>
+    </div>
+
+    <div class="list-panel">
+        <h2>近期來訪車輛明細</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>訪客姓名</th>
+                    <th>被訪人姓名</th>
+                    <th>日期</th>
+                    <th>時段</th>
+                </tr>
+            </thead>
+            <tbody id="recordList">
+                <tr><td colspan="4" class="loading-text">資料載入中，請稍候...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    // 您的專屬 Google Apps Script API 網址
+    const API_URL = "https://script.google.com/macros/s/AKfycbzw6tRZl7CA0c_N3rH0SeS-QK5r7O3dCNbDHDBTqUIbOuBx5bIkp6SZvYvK7ISEc0q1/exec";
+    
+    let currentCaptcha = "";
+
+    // 系統初始化
+    window.onload = function() {
+        initDateConstraints();
+        generateCaptcha();
+        fetchListFromCloud(); // 改為從雲端抓取明細
+    };
+
+    // 產生隨機驗證碼 (4碼英數)
+    function generateCaptcha() {
+        const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        currentCaptcha = "";
+        for (let i = 0; i < 4; i++) {
+            currentCaptcha += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        document.getElementById('captchaDisplay').innerText = currentCaptcha;
+    }
+
+    // 限制日期為今起三日內
+    function initDateConstraints() {
+        const dateInput = document.getElementById('visitDate');
+        const today = new Date();
+        const maxDate = new Date();
+        maxDate.setDate(today.getDate() + 2); // 今天 + 2天 = 三日內
+
+        dateInput.min = today.toISOString().split('T')[0];
+        dateInput.max = maxDate.toISOString().split('T')[0];
+    }
+
+    // 表單送出處理 (改為非同步呼叫 API)
+    async function submitForm(event) {
+        event.preventDefault();
+
+        const captchaInput = document.getElementById('captchaInput').value.toUpperCase();
+        if (captchaInput !== currentCaptcha) {
+            alert("驗證碼輸入錯誤，請重新輸入！");
+            generateCaptcha();
+            document.getElementById('captchaInput').value = "";
+            return;
+        }
+
+        // 鎖定按鈕避免重複送出
+        const submitBtn = document.getElementById('submitBtn');
+        submitBtn.disabled = true;
+        submitBtn.innerText = "資料傳送中，請稍候...";
+
+        const record = {
+            visitorName: document.getElementById('visitorName').value,
+            hostName: document.getElementById('hostName').value,
+            visitDate: document.getElementById('visitDate').value,
+            visitTime: document.getElementById('visitTime').value,
+            licensePlate: document.getElementById('licensePlate').value
+        };
+
+        const currentTimestamp = new Date().toLocaleString();
+
+        try {
+            // 透過 POST 傳送資料至 Google Sheets
+            await fetch(API_URL, {
+                method: 'POST',
+                body: JSON.stringify(record)
+            });
+
+            // 成功後顯示成功畫面
+            document.getElementById('bookingForm').style.display = 'none';
+            document.getElementById('successPanel').style.display = 'block';
+            
+            document.getElementById('resPlate').innerText = record.licensePlate;
+            document.getElementById('resDate').innerText = record.visitDate;
+            document.getElementById('resTime').innerText = record.visitTime;
+            document.getElementById('resTimestamp').innerText = currentTimestamp;
+
+            // 重新從雲端抓取最新列表
+            fetchListFromCloud();
+
+        } catch (error) {
+            alert("網路連線異常，預約失敗，請檢查網路後再試。");
+            console.error("Error:", error);
+        } finally {
+            // 解除按鈕鎖定
+            submitBtn.disabled = false;
+            submitBtn.innerText = "確認送出申請";
+        }
+    }
+
+    // 從 Google Apps Script 抓取明細清單
+    async function fetchListFromCloud() {
+        const tbody = document.getElementById('recordList');
+        tbody.innerHTML = '<tr><td colspan="4" class="loading-text">雲端資料同步中...</td></tr>';
+
+        try {
+            const response = await fetch(API_URL);
+            const records = await response.json();
+            renderList(records);
+        } catch (error) {
+            tbody.innerHTML = '<tr><td colspan="4" style="color:red; text-align:center;">資料載入失敗，請重新整理網頁</td></tr>';
+            console.error("Fetch error:", error);
+        }
+    }
+
+    // 去識別化處理 (隱藏第二個字)
+    function maskName(name) {
+        if (!name) return "";
+        if (name.length <= 1) return name;
+        if (name.length === 2) return name.charAt(0) + "O";
+        return name.charAt(0) + "O" + name.substring(2);
+    }
+
+    // 渲染明細列表
+    function renderList(records) {
+        const tbody = document.getElementById('recordList');
+        tbody.innerHTML = "";
+        
+        // 取得系統當下日期(歸零時間)，用於過濾掉過期(三天前)的歷史紀錄
+        const todayStr = new Date().toISOString().split('T')[0];
+
+        // 確保接收到的是陣列
+        if (Array.isArray(records) && records.length > 0) {
+            // 由於試算表資料是依序往下加，為了讓最新預約顯示在上面，我們將陣列反轉
+            const reversedRecords = records.reverse();
+
+            reversedRecords.forEach(record => {
+                // 簡單的安全過濾：如果欄位有值，且預約日期大於等於今天才顯示
+                if (record.visitorName && record.visitDate >= todayStr) {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${maskName(record.visitorName)}</td>
+                        <td>${maskName(record.hostName)}</td>
+                        <td>${record.visitDate}</td>
+                        <td>${record.visitTime}</td>
+                    `;
+                    tbody.appendChild(tr);
+                }
+            });
+            
+            if (tbody.innerHTML === "") {
+                tbody.innerHTML = '<tr><td colspan="4" class="loading-text">近期無來訪紀錄</td></tr>';
+            }
+        } else {
+            tbody.innerHTML = '<tr><td colspan="4" class="loading-text">近期無來訪紀錄</td></tr>';
+        }
+    }
+
+    // 截圖下載功能
+    function downloadScreenshot() {
+        const target = document.getElementById('successPanel');
+        // 暫時隱藏按鈕避免截圖入鏡
+        const buttons = target.querySelectorAll('button');
+        buttons.forEach(btn => btn.style.display = 'none');
+
+        html2canvas(target).then(canvas => {
+            const link = document.createElement('a');
+            link.download = '訪客預約憑證.png';
+            link.href = canvas.toDataURL();
+            link.click();
+            
+            // 恢復按鈕顯示
+            buttons.forEach(btn => btn.style.display = 'inline-block');
+        });
+    }
+
+    // 返回預約畫面
+    function resetForm() {
+        document.getElementById('bookingForm').reset();
+        document.getElementById('bookingForm').style.display = 'block';
+        document.getElementById('successPanel').style.display = 'none';
+        generateCaptcha();
+    }
+</script>
+
+</body>
+</html>
