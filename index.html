@@ -198,11 +198,35 @@
         }
     }
 
+// ★ 資安強化版：動態長度去識別化處理 ★
     function maskName(name) {
         if (!name) return "";
-        if (name.length <= 1) return name;
-        if (name.length === 2) return name.charAt(0) + "O";
-        return name.charAt(0) + "O" + name.substring(2);
+        
+        // 移除前後多餘的空白，確保計算長度準確
+        name = name.trim();
+        const len = name.length;
+        
+        if (len <= 1) {
+            return name;
+        } else if (len === 2) {
+            // 長度 2：保留第 1 個字 (例：李四 -> 李O)
+            return name.substring(0, 1) + "O";
+        } else if (len === 3) {
+            // 長度 3：保留前後各 1 個字 (例：張無忌 -> 張O忌)
+            return name.substring(0, 1) + "O" + name.substring(2);
+        } else if (len === 4) {
+            // 長度 4：保留前後各 1 個字 (例：司馬懿之 -> 司OO之, John -> JOOn)
+            return name.substring(0, 1) + "OO" + name.substring(3);
+        } else {
+            // 長度 5 以上：保留前後各 2 個字，中間全遮 (例：Jessica -> JeOOOca)
+            const firstTwo = name.substring(0, 2);
+            const lastTwo = name.substring(len - 2);
+            // 算出中間需要幾個 O
+            const maskLength = len - 4; 
+            const masks = "O".repeat(maskLength);
+            
+            return firstTwo + masks + lastTwo;
+        }
     }
 
     // ★ 重點修復區域：強化版的清單渲染邏輯 ★
