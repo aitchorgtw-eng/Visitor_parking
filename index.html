@@ -200,32 +200,31 @@
     }
 
     // ★ 重點修復區域：強化版的清單渲染邏輯 ★
+// ★ 終極強化版：具備多層級排序邏輯的清單渲染 ★
     function renderList(records) {
         const tbody = document.getElementById('recordList');
         tbody.innerHTML = "";
         
-        // 取得系統當下日期，並將時間強制歸零至 00:00:00，確保只比對「天數」
+        // 1. 取得今日凌晨 00:00 的時間戳，用於過濾歷史資料
         const today = new Date();
         today.setHours(0, 0, 0, 0);
+        const todayTime = today.getTime();
 
         if (Array.isArray(records) && records.length > 0) {
-            const reversedRecords = records.reverse();
-            let hasValidRecord = false; // 用於追蹤是否有符合條件的紀錄
+            
+            // --- 階段一：過濾與資料清理 (Filtering & Cleaning) ---
+            let validRecords = [];
+            
+            records.forEach(record => {
+                if (!record.visitorName) return; // 略過空行
 
-            reversedRecords.forEach(record => {
-                if (!record.visitorName) return;
-
-                // 1. 將 Google 傳來的任何日期字串，轉化為真正的 JavaScript 預設時間物件
                 const visitDateObj = new Date(record.visitDate);
-                // 2. 忽略時分秒，強制歸零
                 visitDateObj.setHours(0, 0, 0, 0);
+                const recordTime = visitDateObj.getTime();
 
-                // 3. 進行精確的「時間戳」比對：來訪日期 >= 今天
-                if (visitDateObj >= today) {
-                    hasValidRecord = true;
-                    
-                    // 為了畫面美觀，我們將雲端傳來的複雜時間字串 (如 2026-02-23T16:00:00.000Z)
-                    // 轉回乾淨的 YYYY-MM-DD 格式顯示
+                // 只要來訪日期大於等於今天，就收錄至有效陣列
+                if (recordTime >= todayTime) {
+                    // 順便將日期格式統一美化為 YYYY-MM-DD
                     let displayDate = record.visitDate;
                     if (displayDate && displayDate.includes('T')) {
                         const yyyy = visitDateObj.getFullYear();
@@ -233,23 +232,49 @@
                         const dd = String(visitDateObj.getDate()).padStart(2, '0');
                         displayDate = `${yyyy}-${mm}-${dd}`;
                     }
+                    
+                    // 將清理好的資料推入陣列
+                    validRecords.push({
+                        ...record,
+                        recordTime: recordTime, // 儲存時間戳供排序使用
+                        displayDate: displayDate // 儲存美化後的日期供顯示使用
+                    });
+                }
+            });
 
+            // --- 階段二：多層級排序 (Sorting) ---
+            if (validRecords.length > 0) {
+                validRecords.sort((a, b) => {
+                    // 第一排序鍵：比較日期時間戳 (遞增：小 -> 大)
+                    if (a.recordTime !== b.recordTime) {
+                        return a.recordTime - b.recordTime;
+                    }
+                    
+                    // 第二排序鍵：若日期相同，比較時段
+                    // 將時段轉換為數字權重，確保「上午」一定在「下午」前面
+                    const timeWeightA = (a.visitTime === '上午') ? 1 : 2;
+                    const timeWeightB = (b.visitTime === '上午') ? 1 : 2;
+                    
+                    return timeWeightA - timeWeightB;
+                });
+
+                // --- 階段三：渲染至畫面 (Rendering) ---
+                validRecords.forEach(record => {
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td>${maskName(record.visitorName)}</td>
                         <td>${maskName(record.hostName)}</td>
-                        <td>${displayDate}</td>
+                        <td>${record.displayDate}</td>
                         <td>${record.visitTime}</td>
                     `;
                     tbody.appendChild(tr);
-                }
-            });
-            
-            // 如果過濾完之後發現沒有任何近三日的紀錄
-            if (!hasValidRecord) {
+                });
+            } else {
+                // 有資料，但全都是過去的歷史紀錄
                 tbody.innerHTML = '<tr><td colspan="4" class="loading-text">近期無來訪紀錄</td></tr>';
             }
         } else {
+            // 雲端本身沒有任何資料
             tbody.innerHTML = '<tr><td colspan="4" class="loading-text">近期無來訪紀錄</td></tr>';
         }
     }
