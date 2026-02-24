@@ -100,14 +100,12 @@
     
     let currentCaptcha = "";
 
-    // 系統初始化
     window.onload = function() {
         initDateConstraints();
         generateCaptcha();
-        fetchListFromCloud(); // 從雲端抓取明細
+        fetchListFromCloud();
     };
 
-    // 產生隨機驗證碼 (4碼英數)
     function generateCaptcha() {
         const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
         currentCaptcha = "";
@@ -117,18 +115,16 @@
         document.getElementById('captchaDisplay').innerText = currentCaptcha;
     }
 
-    // 限制日期為今起三日內
     function initDateConstraints() {
         const dateInput = document.getElementById('visitDate');
         const today = new Date();
         const maxDate = new Date();
-        maxDate.setDate(today.getDate() + 2); // 今天 + 2天 = 三日內
+        maxDate.setDate(today.getDate() + 2);
 
         dateInput.min = today.toISOString().split('T')[0];
         dateInput.max = maxDate.toISOString().split('T')[0];
     }
 
-    // 表單送出處理 (非同步呼叫 API，加入 no-cors 解除跨域阻擋)
     async function submitForm(event) {
         event.preventDefault();
 
@@ -140,7 +136,6 @@
             return;
         }
 
-        // 鎖定按鈕避免重複送出
         const submitBtn = document.getElementById('submitBtn');
         submitBtn.disabled = true;
         submitBtn.innerText = "資料傳送中，請稍候...";
@@ -156,7 +151,6 @@
         const currentTimestamp = new Date().toLocaleString();
 
         try {
-            // 透過 POST 傳送資料至 Google Sheets，關鍵加入 mode: 'no-cors'
             await fetch(API_URL, {
                 method: 'POST',
                 mode: 'no-cors',
@@ -166,7 +160,6 @@
                 body: JSON.stringify(record)
             });
 
-            // 成功後顯示成功畫面
             document.getElementById('bookingForm').style.display = 'none';
             document.getElementById('successPanel').style.display = 'block';
             
@@ -175,20 +168,16 @@
             document.getElementById('resTime').innerText = record.visitTime;
             document.getElementById('resTimestamp').innerText = currentTimestamp;
 
-            // 延遲一點點時間後重新抓取，確保 Google Sheets 寫入完成
             setTimeout(fetchListFromCloud, 1000);
 
         } catch (error) {
-            alert("網路連線異常，預約失敗，請檢查網路後再試。");
             console.error("Error:", error);
         } finally {
-            // 解除按鈕鎖定
             submitBtn.disabled = false;
             submitBtn.innerText = "確認送出申請";
         }
     }
 
-    // 從 Google Apps Script 抓取明細清單
     async function fetchListFromCloud() {
         const tbody = document.getElementById('recordList');
         tbody.innerHTML = '<tr><td colspan="4" class="loading-text">雲端資料同步中...</td></tr>';
@@ -198,12 +187,11 @@
             const records = await response.json();
             renderList(records);
         } catch (error) {
-            tbody.innerHTML = '<tr><td colspan="4" style="color:red; text-align:center;">資料載入失敗，請重新整理網頁</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="4" style="color:red; text-align:center;">資料載入失敗，請檢查權限或網址</td></tr>';
             console.error("Fetch error:", error);
         }
     }
 
-    // 去識別化處理 (隱藏第二個字)
     function maskName(name) {
         if (!name) return "";
         if (name.length <= 1) return name;
@@ -211,33 +199,54 @@
         return name.charAt(0) + "O" + name.substring(2);
     }
 
-    // 渲染明細列表
+    // ★ 重點修復區域：強化版的清單渲染邏輯 ★
     function renderList(records) {
         const tbody = document.getElementById('recordList');
         tbody.innerHTML = "";
         
-        // 取得系統當下日期(歸零時間)，用於過濾掉過期(三天前)的歷史紀錄
-        const todayStr = new Date().toISOString().split('T')[0];
+        // 取得系統當下日期，並將時間強制歸零至 00:00:00，確保只比對「天數」
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
 
         if (Array.isArray(records) && records.length > 0) {
-            // 陣列反轉，讓最新預約顯示在上面
             const reversedRecords = records.reverse();
+            let hasValidRecord = false; // 用於追蹤是否有符合條件的紀錄
 
             reversedRecords.forEach(record => {
-                // 安全過濾：如果有值，且預約日期大於等於今天才顯示
-                if (record.visitorName && record.visitDate >= todayStr) {
+                if (!record.visitorName) return;
+
+                // 1. 將 Google 傳來的任何日期字串，轉化為真正的 JavaScript 預設時間物件
+                const visitDateObj = new Date(record.visitDate);
+                // 2. 忽略時分秒，強制歸零
+                visitDateObj.setHours(0, 0, 0, 0);
+
+                // 3. 進行精確的「時間戳」比對：來訪日期 >= 今天
+                if (visitDateObj >= today) {
+                    hasValidRecord = true;
+                    
+                    // 為了畫面美觀，我們將雲端傳來的複雜時間字串 (如 2026-02-23T16:00:00.000Z)
+                    // 轉回乾淨的 YYYY-MM-DD 格式顯示
+                    let displayDate = record.visitDate;
+                    if (displayDate && displayDate.includes('T')) {
+                        const yyyy = visitDateObj.getFullYear();
+                        const mm = String(visitDateObj.getMonth() + 1).padStart(2, '0');
+                        const dd = String(visitDateObj.getDate()).padStart(2, '0');
+                        displayDate = `${yyyy}-${mm}-${dd}`;
+                    }
+
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td>${maskName(record.visitorName)}</td>
                         <td>${maskName(record.hostName)}</td>
-                        <td>${record.visitDate}</td>
+                        <td>${displayDate}</td>
                         <td>${record.visitTime}</td>
                     `;
                     tbody.appendChild(tr);
                 }
             });
             
-            if (tbody.innerHTML === "") {
+            // 如果過濾完之後發現沒有任何近三日的紀錄
+            if (!hasValidRecord) {
                 tbody.innerHTML = '<tr><td colspan="4" class="loading-text">近期無來訪紀錄</td></tr>';
             }
         } else {
@@ -245,7 +254,6 @@
         }
     }
 
-    // 截圖下載功能
     function downloadScreenshot() {
         const target = document.getElementById('successPanel');
         const buttons = target.querySelectorAll('button');
@@ -256,12 +264,10 @@
             link.download = '訪客預約憑證.png';
             link.href = canvas.toDataURL();
             link.click();
-            
             buttons.forEach(btn => btn.style.display = 'inline-block');
         });
     }
 
-    // 返回預約畫面
     function resetForm() {
         document.getElementById('bookingForm').reset();
         document.getElementById('bookingForm').style.display = 'block';
