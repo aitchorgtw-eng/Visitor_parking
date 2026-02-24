@@ -95,8 +95,8 @@
 </div>
 
 <script>
-    // 您的專屬 Google Apps Script API 網址
-    const API_URL = "https://script.google.com/macros/s/AKfycbzw6tRZl7CA0c_N3rH0SeS-QK5r7O3dCNbDHDBTqUIbOuBx5bIkp6SZvYvK7ISEc0q1/exec";
+    // 您的專屬 Google Apps Script 正式 API 網址
+    const API_URL = "https://script.google.com/macros/s/AKfycbwsSxccyRYrKx70cbH1e_y21OMsFgr0QRhbWJg7JbsFkpJG_VUNgMJglcKvLB52s6j9/exec";
     
     let currentCaptcha = "";
 
@@ -104,7 +104,7 @@
     window.onload = function() {
         initDateConstraints();
         generateCaptcha();
-        fetchListFromCloud(); // 改為從雲端抓取明細
+        fetchListFromCloud(); // 從雲端抓取明細
     };
 
     // 產生隨機驗證碼 (4碼英數)
@@ -128,7 +128,7 @@
         dateInput.max = maxDate.toISOString().split('T')[0];
     }
 
-    // 表單送出處理 (改為非同步呼叫 API)
+    // 表單送出處理 (非同步呼叫 API，加入 no-cors 解除跨域阻擋)
     async function submitForm(event) {
         event.preventDefault();
 
@@ -156,9 +156,13 @@
         const currentTimestamp = new Date().toLocaleString();
 
         try {
-            // 透過 POST 傳送資料至 Google Sheets
+            // 透過 POST 傳送資料至 Google Sheets，關鍵加入 mode: 'no-cors'
             await fetch(API_URL, {
                 method: 'POST',
+                mode: 'no-cors',
+                headers: {
+                    'Content-Type': 'text/plain;charset=utf-8',
+                },
                 body: JSON.stringify(record)
             });
 
@@ -171,8 +175,8 @@
             document.getElementById('resTime').innerText = record.visitTime;
             document.getElementById('resTimestamp').innerText = currentTimestamp;
 
-            // 重新從雲端抓取最新列表
-            fetchListFromCloud();
+            // 延遲一點點時間後重新抓取，確保 Google Sheets 寫入完成
+            setTimeout(fetchListFromCloud, 1000);
 
         } catch (error) {
             alert("網路連線異常，預約失敗，請檢查網路後再試。");
@@ -215,13 +219,12 @@
         // 取得系統當下日期(歸零時間)，用於過濾掉過期(三天前)的歷史紀錄
         const todayStr = new Date().toISOString().split('T')[0];
 
-        // 確保接收到的是陣列
         if (Array.isArray(records) && records.length > 0) {
-            // 由於試算表資料是依序往下加，為了讓最新預約顯示在上面，我們將陣列反轉
+            // 陣列反轉，讓最新預約顯示在上面
             const reversedRecords = records.reverse();
 
             reversedRecords.forEach(record => {
-                // 簡單的安全過濾：如果欄位有值，且預約日期大於等於今天才顯示
+                // 安全過濾：如果有值，且預約日期大於等於今天才顯示
                 if (record.visitorName && record.visitDate >= todayStr) {
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
@@ -245,7 +248,6 @@
     // 截圖下載功能
     function downloadScreenshot() {
         const target = document.getElementById('successPanel');
-        // 暫時隱藏按鈕避免截圖入鏡
         const buttons = target.querySelectorAll('button');
         buttons.forEach(btn => btn.style.display = 'none');
 
@@ -255,7 +257,6 @@
             link.href = canvas.toDataURL();
             link.click();
             
-            // 恢復按鈕顯示
             buttons.forEach(btn => btn.style.display = 'inline-block');
         });
     }
