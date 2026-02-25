@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>訪客預約與車牌登記系統</title>
+    <title>訪客預約與登記系統</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
         body { font-family: "Microsoft JhengHei", sans-serif; background-color: #f4f7f6; margin: 0; padding: 20px; color: #333; }
@@ -25,9 +25,9 @@
         th { background-color: #f8f9fa; }
 		/* 已過期/灰階紀錄樣式 */
         .expired-record {
-            color: #bdc3c7;          /* 字體變成淺灰色 */
-            background-color: #fafafa; /* 背景稍微變暗 */
-            opacity: 0.6;            /* 整體半透明淡化 */
+            color: #bdc3c7;          
+            background-color: #fafafa; 
+            opacity: 0.6;            
         }
         .loading-text { text-align: center; color: #7f8c8d; padding: 20px; font-style: italic; }
     </style>
@@ -58,8 +58,8 @@
             </select>
         </div>
         <div class="form-group">
-            <label>車牌號碼 (一台車一次申請)</label>
-            <input type="text" id="licensePlate" required placeholder="例如: ABC-1234">
+            <label>車牌號碼 (若有開車請輸入，未開車可免填)</label>
+            <input type="text" id="licensePlate" placeholder="例如: ABC-1234 (選填)">
         </div>
         <div class="form-group">
             <label>驗證碼</label>
@@ -83,7 +83,7 @@
     </div>
 
     <div class="list-panel">
-        <h2>近期來訪車輛明細</h2>
+        <h2>近期來訪明細</h2>
         <table>
             <thead>
                 <tr>
@@ -91,17 +91,17 @@
                     <th>被訪人姓名</th>
                     <th>日期</th>
                     <th>時段</th>
+                    <th>車牌號碼</th>
                 </tr>
             </thead>
             <tbody id="recordList">
-                <tr><td colspan="4" class="loading-text">資料載入中，請稍候...</td></tr>
+                <tr><td colspan="5" class="loading-text">資料載入中，請稍候...</td></tr>
             </tbody>
         </table>
     </div>
 </div>
 
 <script>
-    // 您的專屬 Google Apps Script 正式 API 網址
     const API_URL = "https://script.google.com/macros/s/AKfycbwsSxccyRYrKx70cbH1e_y21OMsFgr0QRhbWJg7JbsFkpJG_VUNgMJglcKvLB52s6j9/exec";
     
     let currentCaptcha = "";
@@ -146,6 +146,7 @@
         submitBtn.disabled = true;
         submitBtn.innerText = "資料傳送中，請稍候...";
 
+        // 擷取資料，若無輸入車牌則為空字串
         const record = {
             visitorName: document.getElementById('visitorName').value,
             hostName: document.getElementById('hostName').value,
@@ -169,7 +170,8 @@
             document.getElementById('bookingForm').style.display = 'none';
             document.getElementById('successPanel').style.display = 'block';
             
-            document.getElementById('resPlate').innerText = record.licensePlate;
+            // 成功畫面動態顯示車牌或標示未提供
+            document.getElementById('resPlate').innerText = record.licensePlate ? record.licensePlate : '未提供 (搭乘大眾運輸)';
             document.getElementById('resDate').innerText = record.visitDate;
             document.getElementById('resTime').innerText = record.visitTime;
             document.getElementById('resTimestamp').innerText = currentTimestamp;
@@ -186,65 +188,64 @@
 
     async function fetchListFromCloud() {
         const tbody = document.getElementById('recordList');
-        tbody.innerHTML = '<tr><td colspan="4" class="loading-text">雲端資料同步中...</td></tr>';
+        // 更新 colspan
+        tbody.innerHTML = '<tr><td colspan="5" class="loading-text">雲端資料同步中...</td></tr>';
 
         try {
             const response = await fetch(API_URL);
             const records = await response.json();
             renderList(records);
         } catch (error) {
-            tbody.innerHTML = '<tr><td colspan="4" style="color:red; text-align:center;">資料載入失敗，請檢查權限或網址</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="5" style="color:red; text-align:center;">資料載入失敗，請檢查權限或網址</td></tr>';
             console.error("Fetch error:", error);
         }
     }
 
-// ★ 資安強化版：動態長度去識別化處理 ★
+    // 姓名去識別化
     function maskName(name) {
         if (!name) return "";
-        
-        // 移除前後多餘的空白，確保計算長度準確
         name = name.trim();
         const len = name.length;
+        if (len <= 1) return name;
+        if (len === 2) return name.substring(0, 1) + "O";
+        if (len === 3) return name.substring(0, 1) + "O" + name.substring(2);
+        if (len === 4) return name.substring(0, 1) + "OO" + name.substring(3);
         
-        if (len <= 1) {
-            return name;
-        } else if (len === 2) {
-            // 長度 2：保留第 1 個字 (例：李四 -> 李O)
-            return name.substring(0, 1) + "O";
-        } else if (len === 3) {
-            // 長度 3：保留前後各 1 個字 (例：張無忌 -> 張O忌)
-            return name.substring(0, 1) + "O" + name.substring(2);
-        } else if (len === 4) {
-            // 長度 4：保留前後各 1 個字 (例：司馬懿之 -> 司OO之, John -> JOOn)
-            return name.substring(0, 1) + "OO" + name.substring(3);
-        } else {
-            // 長度 5 以上：保留前後各 2 個字，中間全遮 (例：Jessica -> JeOOOca)
-            const firstTwo = name.substring(0, 2);
-            const lastTwo = name.substring(len - 2);
-            // 算出中間需要幾個 O
-            const maskLength = len - 4; 
-            const masks = "O".repeat(maskLength);
-            
-            return firstTwo + masks + lastTwo;
-        }
+        const firstTwo = name.substring(0, 2);
+        const lastTwo = name.substring(len - 2);
+        const masks = "O".repeat(len - 4);
+        return firstTwo + masks + lastTwo;
     }
 
-    // ★ 重點修復區域：強化版的清單渲染邏輯 ★
-// ★ 終極強化版：具備多層級排序邏輯的清單渲染 ★
-// ★ 優化版：加入 13:30 動態灰階機制的清單渲染 ★
+    // ★ 新增：車牌去識別化處理 ★
+    function maskLicensePlate(plate) {
+        if (!plate) return "無"; // 沒填寫車牌時顯示 "無"
+        plate = plate.trim();
+        const len = plate.length;
+        
+        // 若車牌過短，則不做過度遮蔽以保留可讀性
+        if (len <= 2) return plate;
+        if (len === 3) return plate.substring(0, 1) + "O" + plate.substring(2);
+        if (len === 4) return plate.substring(0, 1) + "OO" + plate.substring(3);
+        
+        // 長度 5 以上 (如 ABC-1234)：保留前2與後2碼，中間全遮蔽
+        const firstTwo = plate.substring(0, 2);
+        const lastTwo = plate.substring(len - 2);
+        const maskLength = len - 4;
+        const masks = "O".repeat(maskLength);
+        
+        return firstTwo + masks + lastTwo;
+    }
+
     function renderList(records) {
         const tbody = document.getElementById('recordList');
         tbody.innerHTML = "";
         
-        // 取得當前真實時間與日期
         const now = new Date();
         const currentHour = now.getHours();
         const currentMinute = now.getMinutes();
-        
-        // 判斷當下是否已經超過 13:30
         const isAfter1330 = (currentHour > 13) || (currentHour === 13 && currentMinute >= 30);
 
-        // 取得今日凌晨 00:00 的時間戳，用於過濾歷史資料
         const today = new Date(now);
         today.setHours(0, 0, 0, 0);
         const todayTime = today.getTime();
@@ -260,7 +261,6 @@
                 visitDateObj.setHours(0, 0, 0, 0);
                 const recordTime = visitDateObj.getTime();
 
-                // 階段一：保留大於等於今天的紀錄
                 if (recordTime >= todayTime) {
                     let displayDate = record.visitDate;
                     if (displayDate && displayDate.includes('T')) {
@@ -279,7 +279,6 @@
             });
 
             if (validRecords.length > 0) {
-                // 階段二：日期與時段排序
                 validRecords.sort((a, b) => {
                     if (a.recordTime !== b.recordTime) {
                         return a.recordTime - b.recordTime;
@@ -289,35 +288,31 @@
                     return timeWeightA - timeWeightB;
                 });
 
-                // 階段三：渲染與動態灰階判斷
                 validRecords.forEach(record => {
                     const tr = document.createElement('tr');
                     
-                    // 核心邏輯：判斷是否為「今天」的「上午」名單
                     const isTodayRecord = (record.recordTime === todayTime);
                     const isMorningRecord = (record.visitTime === '上午');
 
-                    // 如果是今天上午的名單，且現在已經超過 13:30，套用灰階樣式
                     if (isTodayRecord && isMorningRecord && isAfter1330) {
                         tr.className = 'expired-record'; 
-                        
-                        // 若您最終決定要「完全隱藏」而不是「灰階」，請解開下方這行的註解：
-                        // tr.style.display = 'none'; 
                     }
 
+                    // 加入遮蔽後的車牌欄位輸出
                     tr.innerHTML = `
                         <td>${maskName(record.visitorName)}</td>
                         <td>${maskName(record.hostName)}</td>
                         <td>${record.displayDate}</td>
                         <td>${record.visitTime}</td>
+                        <td>${maskLicensePlate(record.licensePlate)}</td>
                     `;
                     tbody.appendChild(tr);
                 });
             } else {
-                tbody.innerHTML = '<tr><td colspan="4" class="loading-text">近期無來訪紀錄</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="5" class="loading-text">近期無來訪紀錄</td></tr>';
             }
         } else {
-            tbody.innerHTML = '<tr><td colspan="4" class="loading-text">近期無來訪紀錄</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="5" class="loading-text">近期無來訪紀錄</td></tr>';
         }
     }
 
