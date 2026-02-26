@@ -23,12 +23,8 @@
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
         th, td { border: 1px solid #ddd; padding: 10px; text-align: center; }
         th { background-color: #f8f9fa; }
-		/* 已過期/灰階紀錄樣式 */
-        .expired-record {
-            color: #bdc3c7;          
-            background-color: #fafafa; 
-            opacity: 0.6;            
-        }
+        /* 已過期/灰階紀錄樣式 */
+        .expired-record { color: #bdc3c7; background-color: #fafafa; opacity: 0.6; }
         .loading-text { text-align: center; color: #7f8c8d; padding: 20px; font-style: italic; }
     </style>
 </head>
@@ -47,11 +43,11 @@
             <input type="text" id="hostName" required placeholder="請輸入被訪人姓名">
         </div>
         <div class="form-group">
-            <label>來訪日期 (限今起三日內)</label>
+            <label>來訪日期 (限今起三日內，週日不開放)</label>
             <input type="date" id="visitDate" required>
         </div>
         <div class="form-group">
-            <label>來訪時段</label>
+            <label>來訪時段 (每時段限額 3 名)</label>
             <select id="visitTime">
                 <option value="上午">上午</option>
                 <option value="下午">下午</option>
@@ -105,6 +101,8 @@
     const API_URL = "https://script.google.com/macros/s/AKfycbwsSxccyRYrKx70cbH1e_y21OMsFgr0QRhbWJg7JbsFkpJG_VUNgMJglcKvLB52s6j9/exec";
     
     let currentCaptcha = "";
+    // ★ 新增：全域變數，用來暫存從雲端抓下來的所有名單，以利計算人數
+    let currentRecords = [];
 
     window.onload = function() {
         initDateConstraints();
@@ -129,6 +127,27 @@
 
         dateInput.min = today.toISOString().split('T')[0];
         dateInput.max = maxDate.toISOString().split('T')[0];
+
+        // ★ 新增：監聽日期改變事件，若選擇週日則警告並清空
+        dateInput.addEventListener('change', function() {
+            if (this.value) {
+                const selectedDate = new Date(this.value);
+                if (selectedDate.getDay() === 0) { // getDay() 回傳 0 代表週日
+                    alert("⚠️ 週日無值班人員，請選擇其他日期！");
+                    this.value = ''; // 強制清空使用者的選擇
+                }
+            }
+        });
+    }
+
+    // ★ 新增：日期格式化工具 (將 Google 的複雜時間轉為 YYYY-MM-DD)
+    function formatDateToYYYYMMDD(dateString) {
+        if (!dateString) return "";
+        const d = new Date(dateString);
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
     }
 
     async function submitForm(event) {
@@ -142,16 +161,34 @@
             return;
         }
 
+        // 取得使用者選擇的日期與時段
+        const selectedDate = document.getElementById('visitDate').value;
+        const selectedTime = document.getElementById('visitTime').value;
+
+        // ★ 新增：人數上限驗證邏輯 (名額 3 名)
+        const existingCount = currentRecords.filter(record => {
+            if (!record.visitDate) return false;
+            // 由於雲端抓下來的日期可能是帶時區的字串，需轉換後再比對
+            const recordFormattedDate = formatDateToYYYYMMDD(record.visitDate);
+            return (recordFormattedDate === selectedDate && record.visitTime === selectedTime);
+        }).length;
+
+        if (existingCount >= 3) {
+            alert(`⛔ 抱歉！${selectedDate} 的【${selectedTime}】預約人數已滿（限額 3 名）。\n請選擇其他時段或日期！`);
+            generateCaptcha();
+            document.getElementById('captchaInput').value = "";
+            return; // 終止送出
+        }
+
         const submitBtn = document.getElementById('submitBtn');
         submitBtn.disabled = true;
         submitBtn.innerText = "資料傳送中，請稍候...";
 
-        // 擷取資料，若無輸入車牌則為空字串
         const record = {
             visitorName: document.getElementById('visitorName').value,
             hostName: document.getElementById('hostName').value,
-            visitDate: document.getElementById('visitDate').value,
-            visitTime: document.getElementById('visitTime').value,
+            visitDate: selectedDate,
+            visitTime: selectedTime,
             licensePlate: document.getElementById('licensePlate').value
         };
 
@@ -170,7 +207,6 @@
             document.getElementById('bookingForm').style.display = 'none';
             document.getElementById('successPanel').style.display = 'block';
             
-            // 成功畫面動態顯示車牌或標示未提供
             document.getElementById('resPlate').innerText = record.licensePlate ? record.licensePlate : '未提供 (搭乘大眾運輸)';
             document.getElementById('resDate').innerText = record.visitDate;
             document.getElementById('resTime').innerText = record.visitTime;
@@ -188,12 +224,15 @@
 
     async function fetchListFromCloud() {
         const tbody = document.getElementById('recordList');
-        // 更新 colspan
         tbody.innerHTML = '<tr><td colspan="5" class="loading-text">雲端資料同步中...</td></tr>';
 
         try {
             const response = await fetch(API_URL);
             const records = await response.json();
+            
+            // ★ 新增：將抓回來的資料存入全域變數，供 submitForm 時驗證人數使用
+            currentRecords = Array.isArray(records) ? records : [];
+            
             renderList(records);
         } catch (error) {
             tbody.innerHTML = '<tr><td colspan="5" style="color:red; text-align:center;">資料載入失敗，請檢查權限或網址</td></tr>';
@@ -201,7 +240,6 @@
         }
     }
 
-    // 姓名去識別化
     function maskName(name) {
         if (!name) return "";
         name = name.trim();
@@ -217,18 +255,15 @@
         return firstTwo + masks + lastTwo;
     }
 
-    // ★ 新增：車牌去識別化處理 ★
     function maskLicensePlate(plate) {
-        if (!plate) return "無"; // 沒填寫車牌時顯示 "無"
+        if (!plate) return "無"; 
         plate = plate.trim();
         const len = plate.length;
         
-        // 若車牌過短，則不做過度遮蔽以保留可讀性
         if (len <= 2) return plate;
         if (len === 3) return plate.substring(0, 1) + "O" + plate.substring(2);
         if (len === 4) return plate.substring(0, 1) + "OO" + plate.substring(3);
         
-        // 長度 5 以上 (如 ABC-1234)：保留前2與後2碼，中間全遮蔽
         const firstTwo = plate.substring(0, 2);
         const lastTwo = plate.substring(len - 2);
         const maskLength = len - 4;
@@ -262,13 +297,7 @@
                 const recordTime = visitDateObj.getTime();
 
                 if (recordTime >= todayTime) {
-                    let displayDate = record.visitDate;
-                    if (displayDate && displayDate.includes('T')) {
-                        const yyyy = visitDateObj.getFullYear();
-                        const mm = String(visitDateObj.getMonth() + 1).padStart(2, '0');
-                        const dd = String(visitDateObj.getDate()).padStart(2, '0');
-                        displayDate = `${yyyy}-${mm}-${dd}`;
-                    }
+                    let displayDate = formatDateToYYYYMMDD(record.visitDate);
                     
                     validRecords.push({
                         ...record,
@@ -298,7 +327,6 @@
                         tr.className = 'expired-record'; 
                     }
 
-                    // 加入遮蔽後的車牌欄位輸出
                     tr.innerHTML = `
                         <td>${maskName(record.visitorName)}</td>
                         <td>${maskName(record.hostName)}</td>
